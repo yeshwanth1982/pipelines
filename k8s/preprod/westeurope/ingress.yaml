@@ -1,0 +1,56 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: coresvc-ingress
+  namespace: loadstar-coresvc
+  annotations:
+    # https://confluence.maerskdev.net/display/P/Set+up+authentication+for+applications+in+Kubernetes
+    # Tell nginx to pass these headers to the upstream service
+    # external-dns.alpha.kubernetes.io/target: global-zone-sync-dev.trafficmanager.net
+    #nginx.ingress.kubernetes.io/auth-response-headers: X-Auth-Request-User,X-Auth-Request-Email,X-Forwarded-Access-Token,Authenticated
+    # Redirect all unauthenticated traffic to the /oauth2/start endpoint
+    #nginx.ingress.kubernetes.io/auth-signin: https://$host/oauth2/start?rd=$request_uri
+    # Check that all incoming traffic is authenticated by calling /oauth2/auth
+    #nginx.ingress.kubernetes.io/auth-url: https://$host/oauth2/auth
+    kubernetes.io/ingress.class: "nginx"
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization,X-Ipace-Onboarded-App-Id"
+    # Allow traffic from Apigee IP address only
+    # nginx.ingress.kubernetes.io/whitelist-source-range: 35.221.111.12,35.200.13.90,35.195.223.195,35.187.105.240,35.243.224.157,35.231.168.188
+spec:
+  rules:
+    - host: core-svc-loadstar.preprod.maersk-digital.net
+      http:
+        paths:
+        - pathType: Prefix
+          path: /core-srv
+          backend:
+            service:
+              name: sre-perf-ls-core-service
+              port:
+                number: 8080
+        - pathType: Prefix
+          path: "/admin"
+          backend:
+            service:
+              name: sre-perf-ls-core-service
+              port:
+                number: 8080   
+        - pathType: Prefix
+          path: "/kafka"
+          backend:
+            service:
+              name: sre-perf-ls-core-service
+              port:
+                number: 8080    
+        - pathType: Prefix
+          path: "/health"
+          backend:
+            service:
+              name: sre-perf-ls-core-service
+              port:
+                number: 8080               
+  tls: 
+    - hosts:
+      - core-svc-loadstar.preprod.maersk-digital.net
+      secretName: tls-wildcard-maersk-digital-net

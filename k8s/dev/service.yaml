@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    k8s-app: sre-perf-ls-core-service
+  name: sre-perf-ls-core-service
+  namespace: loadstar-coresvc
+spec:
+  internalTrafficPolicy: Cluster
+  ports:
+  - port: 8080
+    protocol: TCP
+    targetPort: 8080
+  selector:
+    k8s-app: sre-perf-ls-core-service
+  sessionAffinity: None
+  type: ClusterIP
