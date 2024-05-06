@@ -1,0 +1,205 @@
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+      - develop
+      - 'hotfix/**'
+      - 'feature/**'
+      - 'bugfix/**'
+      - 'epics/**'
+
+name: Build, run integration tests and push Docker image
+jobs:
+
+  build:
+    name: Maven Build - Version- v${{ github.run_id }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v1
+        name: Checkout repo
+      - name: Maven Deploy
+        uses: ./.github/actions/maven-deploy
+        with:
+          githubUsername: ${{ secrets.GH_USERNAME }}
+          githubUserEmail: ${{ secrets.GH_USER_EMAIL }}
+          githubToken: ${{ secrets.ACCESS_TOKEN }}
+          jdkVersion: '11'
+      - uses: actions/upload-artifact@v3
+        with:
+          name: workspace
+          path: ${{ github.workspace }}
+      - uses: actions/upload-artifact@v3
+        name: Upload cucumber report
+        if: always()
+        with:
+          name: cucumber-report
+          path: ${{ github.workspace }}/integrationtest/target/results
+      - uses: actions/upload-artifact@v3
+        name: Upload junit report
+        if: always()
+        with:
+          name: junit-report
+          path: ${{ github.workspace }}/service/target/surefire-reports
+      - uses: actions/upload-artifact@v3
+        name: Upload image artifact
+        with:
+          name: docker-image
+          path: ${{ github.workspace }}/service/image.tar
+
+  cucumber-report:
+    name: Cucumber Report
+    runs-on: ubuntu-latest
+    if: success() || failure()
+    needs: [ build ]
+    steps:
+      - uses: actions/download-artifact@v3
+        with:
+          name: cucumber-report
+      - uses: Maersk-Global/cucumber-reporter-action@1.0
+        name: Generate cucumber report
+        if: always()
+        with:
+          path: ${{ github.workspace }}/cucumber.json
+          reportType: failedOnly
+
+  junit-report:
+    name: Junit Report
+    runs-on: ubuntu-latest
+    if: success() || failure()
+    needs: [ build ]
+    steps:
+      - uses: actions/download-artifact@v3
+        with:
+          name: junit-report
+      - uses: Maersk-Global/junit-reporter-action@1.0
+        name: Generate junit report
+        if: always()
+        with:
+          path: ${{ github.workspace }}
+
+  sonarqube:
+    name: SonarQube scan
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v3
+        with:
+          name: workspace
+      - name: Checkout common actions
+        uses: actions/checkout@v3
+        with:
+          repository: maersk-global/github-actions-commons
+          token: ${{ secrets.ACCESS_TOKEN }}
+          path: .github/actions/commons
+      - uses: ./.github/actions/commons/sonarqube-scan
+        with:
+          githubToken: ${{ secrets.ACCESS_TOKEN }}
+          host: ${{ secrets.MDN_SONARQUBE_HOST }}
+          token: ${{ secrets.MDN_SONARQUBE_TOKEN }}
+
+  blackduck:
+    name: Blackduck scan
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v3
+        with:
+          name: workspace
+      - name: Checkout common actions
+        uses: actions/checkout@v3
+        with:
+          repository: maersk-global/github-actions-commons
+          token: ${{ secrets.ACCESS_TOKEN }}
+          path: .github/actions/commons
+      - uses: ./.github/actions/commons/blackduck-scan
+        with:
+          githubToken: ${{ secrets.ACCESS_TOKEN }}
+          url: ${{ secrets.BLACKDUCK_URL }}
+          apiToken: ${{ secrets.BLACKDUCK_API_TOKEN }}
+          cleanupToken: ${{ secrets.BLACKDUCK_CLEANUP_VERSIONS_AZFUN_TOKEN }}
+
+  polaris:
+    if: ${{ github.event_name == 'push' }}
+    name: Polaris scan
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v3
+        with:
+          name: workspace
+      - name: Checkout common actions
+        uses: actions/checkout@v3
+        with:
+          repository: 'Maersk-Global/github-actions'
+          token: ${{ secrets.ACCESS_TOKEN }}
+          path: '.github/actions/common-polaris'
+      - uses: Maersk-Global/github-actions-commons/polaris-scan@main
+        with:
+          githubToken: ${{ secrets.ACCESS_TOKEN }}
+          apiToken: ${{ secrets.POLARIS_API_TOKEN }}
+          serverUrl: ${{ secrets.POLARIS_SERVER_URL }}
+          cleanupNeeded: false
+          cleanupToken: ${{ secrets.BLACKDUCK_CLEANUP_VERSIONS_AZFUN_TOKEN }}
+          java_version: '11'
+
+      - name: Upload resultFile
+        uses: actions/upload-artifact@v3
+        with:
+          name: polaris-scan-results
+          path: polaris-results.sarif.json
+
+  trivy:
+    if: ${{ github.event_name == 'push' }}
+    name: Trivy Sacn
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout common actions
+        uses: actions/checkout@v3
+        with:
+          repository: maersk-global/github-actions-commons
+          ref: feature-trivy-scan
+          token: ${{ secrets.ACCESS_TOKEN }}
+          path: .github/actions/commons
+      - name: Trivy Exemptions
+        run: echo -e "CVE-2016-1000027\nCVE-2022-1471\nCVE-2023-20873\nCVE-2023-20862" > ${{ github.workspace }}/.trivyignore
+      - name: Trivy Scan
+        with:
+          vulnerabilityType: os
+          severity: CRITICAL
+          imageName: ghcr.io/${{ github.repository }}-service
+          imageVersion: v${{ github.run_id }}
+        uses: ./.github/actions/commons/trivy-scan
+
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+    name: Release
+    runs-on: ubuntu-latest
+    needs: [ helm-deploy ]
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Maven Release
+        uses: ./.github/actions/maven-release
+        with:
+          githubUsername: ${{ secrets.GH_USERNAME }}
+          githubToken: ${{ secrets.ACCESS_TOKEN }}
+          githubUserEmail: ${{ secrets.GH_USER_EMAIL }}
+          jdkVersion: '11'
+
+  helm-deploy:
+    name: Helm Chart Deploy
+    needs: [blackduck, sonarqube, trivy ]
+    uses: ./.github/workflows/build-helm-chart.yml
+    secrets: inherit
+
+  deploy:
+    name: Deploy
+    needs: [ helm-deploy ]
+    uses: ./.github/workflows/deploy.yml
+    with:
+      dockerImageVersion: v${{ github.run_id }}
+      helmChartVersion: v${{ github.run_id }}
+    secrets: inherit

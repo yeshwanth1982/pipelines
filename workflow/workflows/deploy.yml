@@ -1,0 +1,327 @@
+on:
+  workflow_call:
+    inputs:
+      dockerImageVersion:
+        description: Docker image version
+        required: false
+        type: string
+      helmChartVersion:
+        description: Helm chart version
+        type: string
+        required: false
+  workflow_dispatch:
+    inputs:
+      dockerImageVersion:
+        description: Docker image version
+        required: false
+      helmChartVersion:
+        description: Helm chart version
+        required: false
+
+name: Deploy
+jobs:
+  prepare:
+    name: Prepare deployment
+    runs-on: ubuntu-latest
+    outputs:
+      dockerImage: ${{ steps.prepare-deployment.outputs.dockerImage }}
+      dockerImageVersion: ${{ steps.prepare-deployment.outputs.dockerImageVersion }}
+      helmChart: ${{ steps.prepare-deployment.outputs.helmChart }}
+      helmChartVersion: ${{ steps.prepare-deployment.outputs.helmChartVersion }}
+    steps:
+      - name: Checkout common actions
+        uses: actions/checkout@v3
+        with:
+          repository: maersk-global/github-actions-commons
+          token: ${{ secrets.ACCESS_TOKEN }}
+          path: .github/actions/commons
+      - name: set helm chart name
+        id: chartName
+        shell: bash
+        run: |
+          default_branch=${{ github.event.repository.default_branch }};
+          echo "Default branch: $default_branch";
+          echo "Current branch: ${{ github.ref }}";
+          chart_name='ssib-adf-producer-chart';
+          if [ "refs/heads/$default_branch" != "${{ github.ref }}" ]; then chart_name="$chart_name-dev"; fi
+          echo "Setting Helm chart name to $chart_name"
+          echo "github.repositor to $github.repository"
+          echo "SSIB_HELM_CHART_NAME=$chart_name" >>${GITHUB_ENV}
+      - id: prepare-deployment
+        name: Prepare deployment
+        uses: ./.github/actions/commons/prepare-deployment
+        with:
+          githubToken: ${{ secrets.ACCESS_TOKEN }}
+          dockerImage: 'ssib-adf-producer-service'
+          helmChart: ${{ env.SSIB_HELM_CHART_NAME }}
+          dockerImageVersion: ${{ inputs.dockerImageVersion }}
+          helmChartVersion: ${{ inputs.helmChartVersion }}
+
+  deploy-barge-cdt:
+    name: barge  - service version- ${{ needs.prepare.outputs.dockerImageVersion }} chart version- ${{ needs.prepare.outputs.helmChartVersion }}
+    environment: barge
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        name: Checkout repo
+      - name: Checkout common actions
+        uses: actions/checkout@v3
+        with:
+          repository: maersk-global/github-actions-commons
+          token: ${{ secrets.ACCESS_TOKEN }}
+          path: .github/actions/commons
+      - name: Helm install
+        uses: ./.github/actions/commons/helm-upgrade
+        with:
+          helmChart: ${{ needs.prepare.outputs.helmChart }}
+          helmChartVersion: ${{ needs.prepare.outputs.helmChartVersion }}
+          dockerImage: ${{ needs.prepare.outputs.dockerImage }}
+          dockerImageVersion: ${{ needs.prepare.outputs.dockerImageVersion }}
+          helmValues: ./helm/chart/values/dev/barge/values.yaml
+          registryPassword: ${{ secrets.GHCR_PULL_TOKEN }}
+          k8s-cluster: ohp-np-west-1
+          k8s-namespace: ssib-barge
+          vaultName: ${{ secrets.VAULT_NAME }}
+          vaultRoleId: ${{ secrets.VAULT_ROLE_ID }}
+          vaultRoleSecretId: ${{ secrets.VAULT_ROLE_SECRET_ID }}
+
+  deploy-scow-cdt:
+    #    if: github.event.inputs.environment == 'scow'
+    name: scow - service version- ${{ needs.prepare.outputs.dockerImageVersion }} chart version- ${{ needs.prepare.outputs.helmChartVersion }}
+    environment: scow
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        name: Checkout repo
+      - name: Checkout common actions
+        uses: actions/checkout@v3
+        with:
+          repository: maersk-global/github-actions-commons
+          token: ${{ secrets.ACCESS_TOKEN }}
+          path: .github/actions/commons
+      - name: Helm install
+        uses: ./.github/actions/commons/helm-upgrade
+        with:
+          helmChart: ${{ needs.prepare.outputs.helmChart }}
+          helmChartVersion: ${{ needs.prepare.outputs.helmChartVersion }}
+          dockerImage: ${{ needs.prepare.outputs.dockerImage }}
+          dockerImageVersion: ${{ needs.prepare.outputs.dockerImageVersion }}
+          helmValues: ./helm/chart/values/dev/scow/values.yaml
+          registryPassword: ${{ secrets.GHCR_PULL_TOKEN }}
+          k8s-cluster: ohp-np-west-1
+          k8s-namespace: ssib-scow
+          vaultName: ${{ secrets.VAULT_NAME }}
+          vaultRoleId: ${{ secrets.VAULT_ROLE_ID }}
+          vaultRoleSecretId: ${{ secrets.VAULT_ROLE_SECRET_ID }}
+
+  deploy-cdt:
+    #    if: github.event.inputs.environment == 'cdt' || endsWith( github.ref, 'develop' )
+    name: cdt - service version- ${{ needs.prepare.outputs.dockerImageVersion }} chart version- ${{ needs.prepare.outputs.helmChartVersion }}
+    environment: cdt
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        name: Checkout repo
+      - name: Checkout common actions
+        uses: actions/checkout@v3
+        with:
+          repository: maersk-global/github-actions-commons
+          token: ${{ secrets.ACCESS_TOKEN }}
+          path: .github/actions/commons
+      - name: Helm install
+        uses: ./.github/actions/commons/helm-upgrade
+        with:
+          helmChart: ${{ needs.prepare.outputs.helmChart }}
+          helmChartVersion: ${{ needs.prepare.outputs.helmChartVersion }}
+          dockerImage: ${{ needs.prepare.outputs.dockerImage }}
+          dockerImageVersion: ${{ needs.prepare.outputs.dockerImageVersion }}
+          helmValues: ./helm/chart/values/dev/cdt/values.yaml
+          registryPassword: ${{ secrets.GHCR_PULL_TOKEN }}
+          k8s-cluster: ohp-np-west-1
+          k8s-namespace: ohp-dev
+          vaultName: ${{ secrets.VAULT_NAME }}
+          vaultRoleId: ${{ secrets.VAULT_ROLE_ID }}
+          vaultRoleSecretId: ${{ secrets.VAULT_ROLE_SECRET_ID }}
+
+  deploy-scow-preprod:
+    #    if: github.event.inputs.environment == 'scow-preprod'
+    name: scow-preprod - service version- ${{ needs.prepare.outputs.dockerImageVersion }} chart version- ${{ needs.prepare.outputs.helmChartVersion }}
+    environment: scow-preprod
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        name: Checkout repo
+      - name: Checkout common actions
+        uses: actions/checkout@v3
+        with:
+          repository: maersk-global/github-actions-commons
+          token: ${{ secrets.ACCESS_TOKEN }}
+          path: .github/actions/commons
+      - name: Helm install
+        uses: ./.github/actions/commons/helm-upgrade
+        with:
+          helmChart: ${{ needs.prepare.outputs.helmChart }}
+          helmChartVersion: ${{ needs.prepare.outputs.helmChartVersion }}
+          dockerImage: ${{ needs.prepare.outputs.dockerImage }}
+          dockerImageVersion: ${{ needs.prepare.outputs.dockerImageVersion }}
+          helmValues: ./helm/chart/values/preprod/scow/values.yaml
+          registryPassword: ${{ secrets.GHCR_PULL_TOKEN }}
+          k8s-cluster: ohp-np-west-1
+          k8s-namespace: ohp-scow-preprod
+          vaultName: ${{ secrets.VAULT_NAME }}
+          vaultRoleId: ${{ secrets.VAULT_ROLE_ID }}
+          vaultRoleSecretId: ${{ secrets.VAULT_ROLE_SECRET_ID }}
+
+  deploy-barge-preprod:
+    #    if: github.event.inputs.environment == 'barge-preprod'
+    name: barge-preprod - service version- ${{ needs.prepare.outputs.dockerImageVersion }} chart version- ${{ needs.prepare.outputs.helmChartVersion }}
+    environment: barge-preprod
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        name: Checkout repo
+      - name: Checkout common actions
+        uses: actions/checkout@v3
+        with:
+          repository: maersk-global/github-actions-commons
+          token: ${{ secrets.ACCESS_TOKEN }}
+          path: .github/actions/commons
+      - name: Helm install
+        uses: ./.github/actions/commons/helm-upgrade
+        with:
+          helmChart: ${{ needs.prepare.outputs.helmChart }}
+          helmChartVersion: ${{ needs.prepare.outputs.helmChartVersion }}
+          dockerImage: ${{ needs.prepare.outputs.dockerImage }}
+          dockerImageVersion: ${{ needs.prepare.outputs.dockerImageVersion }}
+          helmValues: ./helm/chart/values/preprod/barge/values.yaml
+          registryPassword: ${{ secrets.GHCR_PULL_TOKEN }}
+          k8s-cluster: ohp-np-west-1
+          k8s-namespace: ohp-barge-preprod
+          vaultName: ${{ secrets.VAULT_NAME }}
+          vaultRoleId: ${{ secrets.VAULT_ROLE_ID }}
+          vaultRoleSecretId: ${{ secrets.VAULT_ROLE_SECRET_ID }}
+
+  deploy-preprod-dr:
+    #    if: github.event.inputs.environment == 'preprod-dr'
+    name: preprod-dr - service version- ${{ needs.prepare.outputs.dockerImageVersion }} chart version- ${{ needs.prepare.outputs.helmChartVersion }}
+    environment: preprod-dr
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        name: Checkout repo
+      - name: Checkout common actions
+        uses: actions/checkout@v3
+        with:
+          repository: maersk-global/github-actions-commons
+          token: ${{ secrets.ACCESS_TOKEN }}
+          path: .github/actions/commons
+      - name: Helm install
+        uses: ./.github/actions/commons/helm-upgrade
+        with:
+          helmChart: ${{ needs.prepare.outputs.helmChart }}
+          helmChartVersion: ${{ needs.prepare.outputs.helmChartVersion }}
+          dockerImage: ${{ needs.prepare.outputs.dockerImage }}
+          dockerImageVersion: ${{ needs.prepare.outputs.dockerImageVersion }}
+          helmValues: ./helm/chart/values/preprod/dr/values.yaml
+          registryPassword: ${{ secrets.GHCR_PULL_TOKEN }}
+          k8s-cluster: ohp-np-north-1
+          k8s-namespace: ohp-preprod
+          vaultName: ${{ secrets.VAULT_NAME }}
+          vaultRoleId: ${{ secrets.VAULT_ROLE_ID }}
+          vaultRoleSecretId: ${{ secrets.VAULT_ROLE_SECRET_ID }}
+
+  deploy-preprod:
+    if: endsWith( github.ref, 'master' )
+    name: preprod (pp) - service version- ${{ needs.prepare.outputs.dockerImageVersion }} chart version- ${{ needs.prepare.outputs.helmChartVersion }}
+    environment: preprod
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        name: Checkout repo
+      - name: Checkout common actions
+        uses: actions/checkout@v3
+        with:
+          repository: maersk-global/github-actions-commons
+          token: ${{ secrets.ACCESS_TOKEN }}
+          path: .github/actions/commons
+      - name: Helm install
+        uses: ./.github/actions/commons/helm-upgrade
+        with:
+          helmChart: ${{ needs.prepare.outputs.helmChart }}
+          helmChartVersion: ${{ needs.prepare.outputs.helmChartVersion }}
+          dockerImage: ${{ needs.prepare.outputs.dockerImage }}
+          dockerImageVersion: ${{ needs.prepare.outputs.dockerImageVersion }}
+          helmValues: ./helm/chart/values/preprod/pp/values.yaml
+          registryPassword: ${{ secrets.GHCR_PULL_TOKEN }}
+          k8s-cluster: ohp-np-west-1
+          k8s-namespace: ohp-preprod
+          vaultName: ${{ secrets.VAULT_NAME }}
+          vaultRoleId: ${{ secrets.VAULT_ROLE_ID }}
+          vaultRoleSecretId: ${{ secrets.VAULT_ROLE_SECRET_ID }}
+
+  deploy-prod:
+    if: endsWith( github.ref, 'master' )
+    name: prod (westeurope) - service version- ${{ needs.prepare.outputs.dockerImageVersion }} chart version- ${{ needs.prepare.outputs.helmChartVersion }}
+    environment: prod
+    needs: [ prepare ]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        name: Checkout repo
+      - name: Checkout common actions
+        uses: actions/checkout@v3
+        with:
+          repository: maersk-global/github-actions-commons
+          token: ${{ secrets.ACCESS_TOKEN }}
+          path: .github/actions/commons
+      - name: Helm install
+        uses: ./.github/actions/commons/helm-upgrade
+        with:
+          helmChart: ${{ needs.prepare.outputs.helmChart }}
+          helmChartVersion: ${{ needs.prepare.outputs.helmChartVersion }}
+          dockerImage: ${{ needs.prepare.outputs.dockerImage }}
+          dockerImageVersion: ${{ needs.prepare.outputs.dockerImageVersion }}
+          helmValues: ./helm/chart/values/prod/westeurope/values.yaml
+          registryPassword: ${{ secrets.GHCR_PULL_TOKEN }}
+          k8s-cluster: ohp-prod-west-1
+          k8s-namespace: ohp-ssib-prod
+          vaultName: ${{ secrets.VAULT_NAME }}
+          vaultRoleId: ${{ secrets.VAULT_ROLE_ID }}
+          vaultRoleSecretId: ${{ secrets.VAULT_ROLE_SECRET_ID }}
+
+  deploy-dr:
+    if: endsWith( github.ref, 'master' )
+    name: prod (northeurope) - service version- ${{ needs.prepare.outputs.dockerImageVersion }} chart version- ${{ needs.prepare.outputs.helmChartVersion }}
+    environment: dr
+    needs: [ prepare ]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        name: Checkout repo
+      - name: Checkout common actions
+        uses: actions/checkout@v3
+        with:
+          repository: maersk-global/github-actions-commons
+          token: ${{ secrets.ACCESS_TOKEN }}
+          path: .github/actions/commons
+      - name: Helm install
+        uses: ./.github/actions/commons/helm-upgrade
+        with:
+          helmChart: ${{ needs.prepare.outputs.helmChart }}
+          helmChartVersion: ${{ needs.prepare.outputs.helmChartVersion }}
+          dockerImage: ${{ needs.prepare.outputs.dockerImage }}
+          dockerImageVersion: ${{ needs.prepare.outputs.dockerImageVersion }}
+          helmValues: ./helm/chart/values/prod/northeurope/values.yaml
+          registryPassword: ${{ secrets.GHCR_PULL_TOKEN }}
+          k8s-cluster: ohp-prod-north-1
+          k8s-namespace: ohp-ssib-prod
+          vaultName: ${{ secrets.VAULT_NAME }}
+          vaultRoleId: ${{ secrets.VAULT_ROLE_ID }}
+          vaultRoleSecretId: ${{ secrets.VAULT_ROLE_SECRET_ID }}

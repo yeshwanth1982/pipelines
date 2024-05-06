@@ -1,0 +1,54 @@
+name: Maven build
+description: Maven build
+inputs:
+  githubToken:
+    description: Github access token
+    required: true
+  jdkVersion:
+    description: JDK version
+    required: true
+    default: '17'
+  jdkDistribution:
+    description: JDK distribution
+    required: true
+    default: 'adopt'
+  registry:
+    description: Docker registry
+    required: true
+    default: ghcr.io
+  githubUsername:
+    description: Github username
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Set up JDK
+      uses: actions/setup-java@v3.3.0
+      with:
+        java-version: ${{ inputs.jdkVersion }}
+        distribution: ${{ inputs.jdkDistribution }}
+        cache: 'maven'
+
+    - name: Log in to the Container registry
+      uses: docker/login-action@v2
+      with:
+        registry: ${{ inputs.registry }}
+        username: ${{ github.repository_owner }}
+        password: ${{ inputs.githubToken }}
+
+    - name: Run maven build
+      shell: bash
+      run: |
+        mvn --batch-mode -Pdocker -Dbuild.number=v${{ github.run_id }} clean deploy --no-transfer-progress
+        docker image ls -a
+        echo ${{ github.workspace }}
+        if [ ${{ github.ref }} = "refs/heads/master" ];
+        then
+           echo ${{ github.ref }} branch tag created with run id: v${{ github.run_id }}
+           git remote set-url origin https://${{ inputs.githubUsername }}:${{ inputs.githubToken }}@github.com/${{ github.repository }}.git
+           git tag v${{ github.run_id }}
+           git push origin v${{ github.run_id }}
+        fi
+      env:
+        GITHUB_TOKEN: ${{ inputs.githubToken }}

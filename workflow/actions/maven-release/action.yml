@@ -1,0 +1,43 @@
+name: Maven build
+description: Maven build
+inputs:
+  githubToken:
+    description: Github access token
+    required: true
+  jdkVersion:
+    description: JDK version
+    required: true
+    default: '17'
+  jdkDistribution:
+    description: JDK distribution
+    required: true
+    default: 'adopt'
+  registry:
+    description: Docker registry
+    required: true
+    default: ghcr.io
+  githubUsername:
+    description: Github username
+    required: true
+  githubUserEmail:
+    description: Github user email
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Set up JDK
+      uses: actions/setup-java@v3.3.0
+      with:
+        java-version: ${{ inputs.jdkVersion }}
+        distribution: ${{ inputs.jdkDistribution }}
+        cache: 'maven'
+
+    - name: Maven Release
+      shell: bash
+      run: |
+        git config user.name ${{ inputs.githubUsername }}
+        git config user.email ${{ inputs.githubUserEmail }}
+        mvn --batch-mode release:clean release:prepare release:perform -Dusername=${{ inputs.githubUsername }} -Dpassword=${{ inputs.githubToken }} -Darguments="-Dmaven.tests.skip=true -Dmaven.javadoc.skip=true"
+      env:
+        GITHUB_TOKEN: ${{ inputs.githubToken }}
