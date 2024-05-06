@@ -1,0 +1,168 @@
+# This workflow will build a Java project with Gradle
+# For more information see: https://help.github.com/actions/language-and-framework-guides/building-and-testing-java-with-gradle
+
+name: Java CI with Gradle
+
+on:
+   
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  build:
+
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up JDK 17
+      uses: actions/setup-java@v3
+      with:
+        distribution: 'temurin'
+        java-version: '17'
+
+    - name: Grant execute permission for gradlew
+      run: chmod +x gradlew
+
+    - name: Build with Gradle
+      run: ./gradlew build -x test
+
+    - name: Upload Artifact (jar)
+      uses: actions/upload-artifact@v2
+      with:
+        name: workspace
+        path: ${{ github.workspace }}
+
+  pre-scan:
+    name: Prepare Security Scan
+    needs: build
+    runs-on: ubuntu-latest
+    outputs:
+      doScan: ${{ steps.modified.outputs.doScan }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+      - name: Check file
+        id: modified
+        run: |
+          if [[ "$(git diff --name-only ${{ github.event.before }} ${{ github.sha }})" =~ "pom.xml" ]]; then
+            echo ::set-output name=doScan::true
+          else
+            echo ::set-output name=doScan::false
+          fi
+
+  blackduck:
+    name: Blackduck scans
+    needs: pre-scan
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    if: needs.pre-scan.outputs.doScan == 'true'
+    steps:
+      - name: Download Artifact (Jar)
+        uses: actions/download-artifact@v2
+        with:
+          name: workspace
+      - name: Checkout common actions
+        uses: actions/checkout@v2
+        with:
+          repository: maersk-global/github-actions-commons
+          token: ${{ secrets.EE_CHECKOUT_TOKEN }}
+          path: .github/actions/commons
+      - name: Run scan
+        uses: ./.github/actions/commons/blackduck-scan
+        with:
+          githubToken: ${{ secrets.EE_CHECKOUT_TOKEN }}
+          url: ${{ secrets.BLACKDUCK_URL }}
+          apiToken: ${{ secrets.BLACKDUCK_API_TOKEN }}
+        continue-on-error: true
+
+  polaris:
+    name: Polaris scan
+    needs: pre-scan
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    if: needs.pre-scan.outputs.doScan == 'true'
+    steps:
+      - name: Download Artifact (Jar)
+        uses: actions/download-artifact@v2
+        with:
+          name: workspace
+      - name: Checkout common actions
+        uses: actions/checkout@v2
+        with:
+          repository: maersk-global/github-actions-commons
+          token: ${{ secrets.EE_CHECKOUT_TOKEN }}
+          path: .github/actions/commons
+      - name: Run scan
+        uses: ./.github/actions/commons/polaris-scan
+        with:
+          githubToken: ${{ secrets.EE_CHECKOUT_TOKEN }}
+          apiToken: ${{ secrets.POLARIS_API_TOKEN }}
+          serverUrl: ${{ secrets.POLARIS_SERVER_URL }}
+        continue-on-error: true
+
+  docker-build:
+    name: Build Docker image
+    runs-on: ubuntu-latest
+    # needs: sonarqube
+    needs: build
+    steps:
+      - name: Download Artifact (Jar)
+        uses: actions/download-artifact@v2
+        with:
+          name: workspace
+      - name: Checkout common actions
+        uses: actions/checkout@v2
+        with:
+          repository: maersk-global/github-actions-commons
+          ref: feature-trivy-scan
+          token: ${{ secrets.EE_CHECKOUT_TOKEN }}
+          path: .github/actions/commons
+      - name: Build Docker image
+        uses: ./.github/actions/commons/docker-build
+        with:
+          githubToken: ${{ secrets.MY_TOKEN }}
+
+  trivy:
+    name: Trivy Sacn
+    runs-on: ubuntu-latest
+    needs: docker-build
+    steps:
+      - name: Checkout common actions
+        uses: actions/checkout@v2
+        with:
+          repository: maersk-global/github-actions-commons
+          ref: feature-trivy-scan
+          token: ${{ secrets.EE_CHECKOUT_TOKEN }}
+          path: .github/actions/commons
+      - name: Trivy Scan
+        with:
+          vulnerabilityType: library
+          severity: CRITICAL
+        uses: ./.github/actions/commons/trivy-scan
+
+  docker-push:
+    name: Push Docker image
+    runs-on: ubuntu-latest
+    needs: docker-build
+    steps:
+      - name: Download Artifact (docker image)
+        uses: actions/download-artifact@v2
+        with:
+          name: workspace
+      - name: Checkout common actions
+        uses: actions/checkout@v2
+        with:
+          repository: maersk-global/github-actions-commons
+          ref: feature-trivy-scan
+          token: ${{ secrets.EE_CHECKOUT_TOKEN }}
+          path: .github/actions/commons
+      - name: Push Docker image
+        uses: ./.github/actions/commons/docker-push
+        with:
+          githubToken: ${{ secrets.MY_TOKEN }}

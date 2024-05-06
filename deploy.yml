@@ -1,0 +1,110 @@
+on:
+  workflow_dispatch:
+    inputs:
+      dockerImage:
+        description: Docker image
+        required: false
+      dockerImageVersion:
+        description: Docker image version
+        required: false
+      helmChart:
+        description: Helm chart
+        required: false
+      helmChartVersion:
+        description: Helm chart version
+        required: false
+      env:
+        description: deployment environment
+        type: choice
+        required: true
+        options:
+          - dev
+          - preprod
+          - prod  
+name: Deploy to Kubernetes
+concurrency:
+  group: '${{ github.workflow }} @ ${{ github.event.pull_request.head.label || github.head_ref || github.ref }}'
+  cancel-in-progress: true
+jobs:
+  prepare:
+    name: Prepare deployment
+    runs-on: ubuntu-latest
+    outputs:
+      dockerImage: ${{ steps.prepare-deployment.outputs.dockerImage }}
+      dockerImageVersion: ${{ steps.prepare-deployment.outputs.dockerImageVersion }}
+      helmChart: ${{ steps.prepare-deployment.outputs.helmChart }}
+      helmChartVersion: ${{ steps.prepare-deployment.outputs.helmChartVersion }}
+    steps:
+      - name: Checkout common actions
+        uses: actions/checkout@v2
+        with:
+          repository: maersk-global/github-actions-commons
+          token: ${{ secrets.MY_TOKEN }}
+          path: .github/actions/commons
+      - id: prepare-deployment
+        name: Prepare deployment
+        uses: ./.github/actions/commons/prepare-deployment
+        with:
+          githubToken: ${{ secrets.MY_TOKEN }}
+          dockerImage: ${{ github.event.inputs.dockerImage }}
+          helmChart: ${{ github.event.inputs.helmChart }}
+
+  deploy-dev:
+    name: Dev
+    if: ${{ github.event.inputs.env == 'dev'}}
+    environment: dev
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+        name: Checkout repo
+      - name: Checkout common actions
+        uses: actions/checkout@v2
+        with:
+          repository: maersk-global/github-actions-commons
+          token: ${{ secrets.MY_TOKEN }}
+          path: .github/actions/commons
+      - name: Helm install
+        uses: ./.github/actions/commons/helm-upgrade
+        with:
+          helmChart: ${{ needs.prepare.outputs.helmChart }}
+          helmChartVersion: ${{ needs.prepare.outputs.helmChartVersion }}
+          dockerImage: ${{ needs.prepare.outputs.dockerImage }}
+          dockerImageVersion: ${{ needs.prepare.outputs.dockerImageVersion }}
+          helmValues: ./helm/chart/values/westeurope/dev/values.yaml
+          registryPassword: ${{ secrets.GHCR_PULL_TOKEN }}
+          k8s-cluster: loadstar-np-westeurope-1
+          k8s-namespace: loadstar-coresvc
+          vaultName: ${{ secrets.VAULT_NAME }}
+          vaultRoleId: ${{ secrets.VAULT_ROLE_ID }}
+          vaultRoleSecretId: ${{ secrets.VAULT_ROLE_SECRET_ID }}
+          
+  deploy-preprod:
+    name: Preprod
+    if: ${{ github.event.inputs.env == 'preprod'}}
+    environment: preprod
+    needs: prepare
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+        name: Checkout repo
+      - name: Checkout common actions
+        uses: actions/checkout@v2
+        with:
+          repository: maersk-global/github-actions-commons
+          token: ${{ secrets.MY_TOKEN }}
+          path: .github/actions/commons
+      - name: Helm install
+        uses: ./.github/actions/commons/helm-upgrade
+        with:
+          helmChart: ${{ needs.prepare.outputs.helmChart }}
+          helmChartVersion: ${{ needs.prepare.outputs.helmChartVersion }}
+          dockerImage: ${{ needs.prepare.outputs.dockerImage }}
+          dockerImageVersion: ${{ needs.prepare.outputs.dockerImageVersion }}
+          helmValues: ./helm/chart/values/westeurope/preprod/values.yaml
+          registryPassword: ${{ secrets.GHCR_PULL_TOKEN }}
+          k8s-cluster: loadstar-preprod-westeurope-1
+          k8s-namespace: loadstar-coresvc
+          vaultName: ${{ secrets.VAULT_NAME }}
+          vaultRoleId: ${{ secrets.VAULT_ROLE_ID }}
+          vaultRoleSecretId: ${{ secrets.VAULT_ROLE_SECRET_ID }}        
